@@ -17,6 +17,9 @@ from xml.etree import ElementTree as ET
 
 # Dau so di dong VN: 032-039, 052/055/056/058/059, 070/076-079, 081-089, 090-099
 MOBILE = re.compile(r"^0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9\d)\d{7}$")
+# So 11 chu so: chi can 0 + dau 3/5/7/8/9
+MOBILE11 = re.compile(r"^0[35789]\d{9}$")
+SKIP = "skip"  # dau so 01/02 -> bo qua, khong bao loi
 # Mot "ung vien": bat dau bang so, cho phep chu/dau noi dinh lien; cac cum cach nhau 1 dau cach
 CANDIDATE = re.compile(r"\+?\d[\dA-Za-z.\-()]*(?: \d[\dA-Za-z.\-()]*)*")
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -59,19 +62,19 @@ READERS = {".txt": read_txt, ".docx": read_docx, ".xlsx": read_xlsx, ".xlsm": re
 
 # ---------- chuan hoa ----------
 def normalize(raw):
-    """Tra ve (so_chuan_hoa, None) hoac (None, ly_do)."""
-    if re.search(r"[A-Za-z]", raw):
-        return None, "lan ky tu chu"
-    d = re.sub(r"\D", "", raw)
+    """Tra ve (so_chuan_hoa, None) | (None, ly_do) | (None, SKIP) neu dau so 01/02."""
+    d = re.sub(r"\D", "", raw)  # chi giu so: bo chu, dau cach, ngoac, cham...
     if d.startswith("84") and len(d) == 11:
         d = "0" + d[2:]
     elif len(d) == 9 and d[0] in "35789":  # Excel an mat so 0 dau
         d = "0" + d
-    if len(d) != 10:
-        return None, f"sai do dai ({len(d)} so)"
-    if not MOBILE.match(d):
-        return None, "dau so khong hop le"
-    return d, None
+    if d[:2] in ("01", "02") or (d[:1] in "12" and len(d) in (9, 10)):  # 01/02 (ke ca khi mat so 0)
+        return None, SKIP
+    if len(d) == 10:
+        return (d, None) if MOBILE.match(d) else (None, "đầu số không hợp lệ")
+    if len(d) == 11:
+        return (d, None) if MOBILE11.match(d) else (None, "đầu số không hợp lệ")
+    return None, f"sai độ dài ({len(d)} số)"
 
 
 def extract(text):
@@ -81,22 +84,22 @@ def extract(text):
         if sum(ch.isdigit() for ch in raw) < 8:
             continue
         num, why = normalize(raw)
-        if num:
-            yield num, raw, None
+        if num or why == SKIP:
+            yield num, raw, why
             continue
         parts = raw.split(" ")  # vd "0912345678 0987654321" dinh nhau trong 1 o
         if len(parts) > 1:
             res = [normalize(p) for p in parts]
-            if all(n for n, _ in res):
-                for n, _ in res:
-                    yield n, raw, None
+            if all(n or w == SKIP for n, w in res):
+                for n, w in res:
+                    yield n, raw, w
                 continue
         yield None, raw, why
 
 
 def run(inputs, out):
     seen, valid, rejected = set(), [], []
-    total = 0
+    total = skipped = 0
     for f in inputs:
         reader = READERS.get(Path(f).suffix.lower())
         if not reader:
@@ -104,7 +107,9 @@ def run(inputs, out):
             continue
         for src, text in reader(f):
             for num, raw, why in extract(text):
-                if num:
+                if why == SKIP:
+                    skipped += 1
+                elif num:
                     total += 1
                     if num not in seen:
                         seen.add(num)
@@ -116,6 +121,7 @@ def run(inputs, out):
     err = out.with_name(out.stem + "_loi.txt")
     err.write_text("\n".join(rejected) + ("\n" if rejected else ""), encoding="utf-8")
     msg = (f"Tim thay {total} SDT hop le -> {len(valid)} so khac nhau (bo {total - len(valid)} trung)\n"
+           f"Bo dau so 01/02: {skipped}\n"
            f"Khong hop le: {len(rejected)} (xem {err.name})\nKet qua: {out}")
     print(msg)
     return msg

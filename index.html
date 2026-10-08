@@ -15,11 +15,14 @@
   h1 { font-size:22px; margin:0 0 4px; }
   .sub { color:var(--muted); margin:0 0 20px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
-  #drop { border:2px dashed var(--line); border-radius:10px; padding:28px 12px; text-align:center; cursor:pointer; color:var(--muted); }
-  #drop.over { border-color:var(--accent); color:var(--accent); }
-  ul#files { list-style:none; padding:0; margin:12px 0 0; }
-  ul#files li { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-top:1px solid var(--line); }
-  ul#files button { padding:0 8px; }
+  .boxes { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:640px) { .boxes { grid-template-columns:1fr; } }
+  .box h2 { margin:0 0 8px; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:22px 12px; text-align:center; cursor:pointer; color:var(--muted); }
+  .drop.over { border-color:var(--accent); color:var(--accent); }
+  .box ul { list-style:none; padding:0; margin:8px 0 0; }
+  .box li { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-top:1px solid var(--line); word-break:break-all; }
+  .box li button { padding:0 8px; }
   button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); cursor:pointer; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
   button:disabled { opacity:.5; cursor:default; }
@@ -41,14 +44,25 @@
 <body>
 <main>
   <h1>Lọc số điện thoại</h1>
-  <p class="sub">Đọc file Word / Excel / txt → trích SĐT di động VN, chuẩn hoá, bỏ trùng → xuất file txt. File xử lý ngay trên máy, không gửi đi đâu.</p>
+  <p class="sub">Chọn file Excel và/hoặc Word → bấm Chấp nhận → nhận file txt chứa SĐT đã lọc. File xử lý ngay trên máy, không gửi đi đâu.</p>
 
   <div class="card">
-    <div id="drop">Kéo thả file vào đây hoặc bấm để chọn<br><span class="hint">.docx · .xlsx · .xls · .csv · .txt (không hỗ trợ .doc, lưu lại thành .docx trước)</span></div>
-    <input id="picker" type="file" multiple hidden accept=".docx,.xlsx,.xlsm,.xls,.csv,.txt">
-    <ul id="files"></ul>
+    <div class="boxes">
+      <div class="box" id="boxExcel">
+        <h2>File Excel</h2>
+        <div class="drop">Kéo thả hoặc bấm để chọn<br><span class="hint">.xlsx · .xls · .csv</span></div>
+        <input type="file" multiple hidden accept=".xlsx,.xlsm,.xls,.csv">
+        <ul></ul>
+      </div>
+      <div class="box" id="boxWord">
+        <h2>File Word</h2>
+        <div class="drop">Kéo thả hoặc bấm để chọn<br><span class="hint">.docx (file .doc phải lưu lại thành .docx)</span></div>
+        <input type="file" multiple hidden accept=".docx">
+        <ul></ul>
+      </div>
+    </div>
     <div class="row" style="margin-top:12px">
-      <button id="run" class="primary" disabled>Lọc số</button>
+      <button id="run" class="primary" disabled>Chấp nhận</button>
       <button id="clear" disabled>Xoá hết</button>
     </div>
   </div>
@@ -75,18 +89,20 @@
 <script>
 // Dau so di dong VN: 032-039, 052/055/056/058/059, 070/076-079, 081-089, 090-099
 const MOBILE = /^0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9\d)\d{7}$/;
+const MOBILE11 = /^0[35789]\d{9}$/;   // so 11 chu so: 0 + dau 3/5/7/8/9
+const SKIP = "skip";                   // dau so 01/02 -> bo qua, khong bao loi
 // Mot "ung vien": bat dau bang so, cho phep chu/dau noi dinh lien; cac cum cach nhau 1 dau cach
 const CANDIDATE = /\+?\d[\dA-Za-z.\-()]*(?: \d[\dA-Za-z.\-()]*)*/g;
 
 // ---------- chuan hoa ----------
 function normalize(raw) {
-  if (/[A-Za-z]/.test(raw)) return [null, "lẫn ký tự chữ"];
-  let d = raw.replace(/\D/g, "");
+  let d = raw.replace(/\D/g, "");               // chi giu so: bo chu, dau cach, ngoac, cham...
   if (d.startsWith("84") && d.length === 11) d = "0" + d.slice(2);
   else if (d.length === 9 && "35789".includes(d[0])) d = "0" + d; // Excel an mat so 0 dau
-  if (d.length !== 10) return [null, `sai độ dài (${d.length} số)`];
-  if (!MOBILE.test(d)) return [null, "đầu số không hợp lệ"];
-  return [d, null];
+  if (/^0[12]/.test(d) || (/^[12]/.test(d) && (d.length === 9 || d.length === 10))) return [null, SKIP]; // 01/02, ke ca khi mat so 0
+  if (d.length === 10) return MOBILE.test(d) ? [d, null] : [null, "đầu số không hợp lệ"];
+  if (d.length === 11) return MOBILE11.test(d) ? [d, null] : [null, "đầu số không hợp lệ"];
+  return [null, `sai độ dài (${d.length} số)`];
 }
 
 // Tra ve [{num|null, raw, why}]. Chi bao loi khi ung vien co >= 8 chu so.
@@ -96,11 +112,11 @@ function extract(text) {
     const raw = m[0];
     if (raw.replace(/\D/g, "").length < 8) continue;
     const [num, why] = normalize(raw);
-    if (num) { out.push({ num, raw }); continue; }
+    if (num || why === SKIP) { out.push({ num, raw, why }); continue; }
     const parts = raw.split(" "); // vd "0912345678 0987654321" dinh nhau trong 1 o
     if (parts.length > 1) {
       const res = parts.map(normalize);
-      if (res.every(r => r[0])) { res.forEach(r => out.push({ num: r[0], raw })); continue; }
+      if (res.every(r => r[0] || r[1] === SKIP)) { res.forEach(r => out.push({ num: r[0], raw, why: r[1] })); continue; }
     }
     out.push({ num: null, raw, why });
   }
@@ -140,47 +156,45 @@ async function readSheet(file) {
   return rows;
 }
 
-async function readTxt(file) {
-  return (await file.text()).replace(/^﻿/, "").split(/\r?\n/).map((l, i) => [`dòng ${i + 1}`, l]);
-}
-
-function readerFor(name) {
-  const ext = name.toLowerCase().split(".").pop();
-  if (ext === "docx") return readDocx;
-  if (["xlsx", "xlsm", "xls", "csv"].includes(ext)) return readSheet;
-  if (ext === "txt") return readTxt;
-  return null;
-}
-
 // ---------- UI ----------
 const $ = id => document.getElementById(id);
-let files = [];
+const boxes = [
+  { el: $("boxExcel"), read: readSheet, ok: /\.(xlsx|xlsm|xls|csv)$/i, files: [] },
+  { el: $("boxWord"),  read: readDocx,  ok: /\.docx$/i,               files: [] },
+];
 let validText = "", errText = "";
 
-function renderFiles() {
-  const ul = $("files");
-  ul.replaceChildren(...files.map((f, i) => {
-    const li = document.createElement("li");
-    const label = document.createElement("span");
-    label.textContent = f.name + (readerFor(f.name) ? "" : "  (không hỗ trợ, sẽ bỏ qua)");
-    const x = document.createElement("button");
-    x.textContent = "×";
-    x.onclick = () => { files.splice(i, 1); renderFiles(); };
-    li.append(label, x);
-    return li;
-  }));
-  $("run").disabled = $("clear").disabled = files.length === 0;
+function refresh() {
+  for (const b of boxes) {
+    b.el.querySelector("ul").replaceChildren(...b.files.map((f, i) => {
+      const li = document.createElement("li");
+      const label = document.createElement("span"); label.textContent = f.name;
+      const x = document.createElement("button"); x.textContent = "×";
+      x.onclick = () => { b.files.splice(i, 1); refresh(); };
+      li.append(label, x);
+      return li;
+    }));
+  }
+  const any = boxes.some(b => b.files.length);
+  $("run").disabled = $("clear").disabled = !any;
 }
 
-function addFiles(list) { files.push(...list); renderFiles(); }
+function add(b, list) {
+  const bad = list.filter(f => !b.ok.test(f.name));
+  b.files.push(...list.filter(f => b.ok.test(f.name)));
+  if (bad.length) alert("Sai định dạng, đã bỏ qua: " + bad.map(f => f.name).join(", "));
+  refresh();
+}
 
-const drop = $("drop"), picker = $("picker");
-drop.onclick = () => picker.click();
-picker.onchange = () => { addFiles([...picker.files]); picker.value = ""; };
-drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
-drop.ondragleave = () => drop.classList.remove("over");
-drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); addFiles([...e.dataTransfer.files]); };
-$("clear").onclick = () => { files = []; renderFiles(); $("result").hidden = true; };
+for (const b of boxes) {
+  const drop = b.el.querySelector(".drop"), input = b.el.querySelector("input");
+  drop.onclick = () => input.click();
+  input.onchange = () => { add(b, [...input.files]); input.value = ""; };
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); add(b, [...e.dataTransfer.files]); };
+}
+$("clear").onclick = () => { boxes.forEach(b => b.files = []); refresh(); $("result").hidden = true; };
 
 function download(name, text) {
   const a = document.createElement("a");
@@ -200,18 +214,17 @@ $("copy").onclick = async () => {
 $("run").onclick = async () => {
   const btn = $("run");
   btn.disabled = true; btn.textContent = "Đang xử lý...";
-  const seen = new Set(), valid = [], rejected = [], skipped = [];
-  let total = 0;
+  const seen = new Set(), valid = [], rejected = [];
+  let total = 0, skipped = 0;
   try {
-    for (const f of files) {
-      const reader = readerFor(f.name);
-      if (!reader) { skipped.push(f.name); continue; }
+    for (const b of boxes) for (const f of b.files) {
       let rows;
-      try { rows = await reader(f); }
+      try { rows = await b.read(f); }
       catch (e) { rejected.push({ raw: "(không đọc được file)", why: String(e.message || e), src: f.name }); continue; }
       for (const [src, text] of rows) {
         for (const r of extract(text)) {
-          if (r.num) {
+          if (r.why === SKIP) skipped++;
+          else if (r.num) {
             total++;
             if (!seen.has(r.num)) { seen.add(r.num); valid.push(r.num); }
           } else {
@@ -221,20 +234,21 @@ $("run").onclick = async () => {
       }
     }
   } finally {
-    btn.disabled = false; btn.textContent = "Lọc số";
+    btn.disabled = false; btn.textContent = "Chấp nhận";
   }
   validText = valid.join("\n") + (valid.length ? "\n" : "");
   errText = rejected.map(r => `${r.raw}\t${r.why}\t${r.src}`).join("\n") + (rejected.length ? "\n" : "");
 
   $("stats").replaceChildren(...[
     [total, "SĐT hợp lệ tìm thấy"], [valid.length, "số khác nhau"],
-    [total - valid.length, "số trùng đã bỏ"], [rejected.length, "giá trị lỗi"],
+    [total - valid.length, "số trùng đã bỏ"], [skipped, "số đầu 01/02 đã bỏ"], [rejected.length, "giá trị lỗi"],
   ].map(([n, label]) => {
     const d = document.createElement("div"); d.className = "stat";
     d.innerHTML = "<b></b><span></span>"; d.firstChild.textContent = n; d.lastChild.textContent = label;
     return d;
   }));
   $("out").value = validText;
+  $("dl").disabled = !valid.length;
   $("errCard").hidden = rejected.length === 0;
   $("errCount").textContent = `(${rejected.length})`;
   $("errBody").replaceChildren(...rejected.map(r => {
@@ -245,7 +259,7 @@ $("run").onclick = async () => {
     return tr;
   }));
   $("result").hidden = false;
-  if (skipped.length) alert("Bỏ qua file không hỗ trợ: " + skipped.join(", "));
+  $("dl").scrollIntoView({ behavior: "smooth", block: "center" });
 };
 </script>
 </body>
